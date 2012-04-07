@@ -1,0 +1,4 @@
+#-gram grammar/fruit
+-w grammar/remocon.dict
+-C $HOME/lib/julius/grammar-kit-v4.1/hmm_ptm.jconf
+-input mic -demo
