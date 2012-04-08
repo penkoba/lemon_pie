@@ -59,10 +59,24 @@ struct {
 	{ "テレビ11ch",			"tv_ch11" },
 	{ "テレビ12ch",			"tv_ch12" },
 	{ "CATV電源",			"catv_pwr" },
+	{ "GAORA",			"tv_component1 catv_catv catv_input_ch"
+					" catv_4 catv_2 catv_7" },
 	{ "G+",				"tv_component1 catv_catv catv_input_ch"
 					" catv_4 catv_2 catv_9" },
+	{ "J SPORTS 3",			"tv_component1 catv_catv catv_input_ch"
+					" catv_4 catv_3 catv_0" },
+	{ "J SPORTS 1",			"tv_component1 catv_catv catv_input_ch"
+					" catv_4 catv_3 catv_1" },
+	{ "J SPORTS 2",			"tv_component1 catv_catv catv_input_ch"
+					" catv_4 catv_3 catv_2" },
 	{ "ファミ劇",			"tv_component1 catv_catv catv_input_ch"
 					" catv_5 catv_5 catv_8" },
+	{ "キッズステーション",		"tv_component1 catv_catv catv_input_ch"
+					" catv_6 catv_10 catv_1" },
+	{ "カートゥーンネットワーク",	"tv_component1 catv_catv catv_input_ch"
+					" catv_6 catv_10 catv_2" },
+	{ "アニマックス",		"tv_component1 catv_catv catv_input_ch"
+					" catv_6 catv_2 catv_5" },
 	{ "ナショジオ",			"tv_component1 catv_catv catv_input_ch"
 					" catv_6 catv_5 catv_1" },
 	{ "ディスカバリーチャンネル",	"tv_component1 catv_catv catv_input_ch"
