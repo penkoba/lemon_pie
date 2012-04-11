@@ -1,5 +1,5 @@
 CC =		gcc
-CFLAGS =	-Wall -O2 \
+CFLAGS =	-Wall -W -Wno-unused-parameter -O2 \
 		`libjulius-config --cflags` `libsent-config --cflags`
 LDLIBS =	`libjulius-config --libs` `libsent-config --libs`
 
