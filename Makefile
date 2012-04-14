@@ -3,12 +3,12 @@ CFLAGS =	-Wall -W -Wno-unused-parameter -O2 \
 		`libjulius-config --cflags` `libsent-config --cflags`
 LDLIBS =	`libjulius-config --libs` `libsent-config --libs`
 
-all: jremocon
+all: lemon_pie
 
-check: jremocon
-	./jremocon --verbose
+check: lemon_pie
+	./lemon_pie --verbose
 
 clean:
-	-rm *.o jremocon
+	-rm *.o lemon_pie
 
-jremocon: jremocon.o
+lemon_pie: lemon_pie.o

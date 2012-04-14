@@ -3,7 +3,7 @@
 #include <libgen.h>
 #include <julius/juliuslib.h>
 
-#define LOG_TAG		"[jremocon] "
+#define LOG_TAG		"[lemon_pie] "
 #define JCONF_FILE	"remocon.jconf"
 #define ARRAY_SIZE(a)	(sizeof(a) / sizeof(a[0]))
 
