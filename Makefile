@@ -11,4 +11,5 @@ check: lemon_pie
 clean:
 	-rm *.o lemon_pie
 
+lemon_pie.o: lemon_pie.c sensor_cmd.h
 lemon_pie: lemon_pie.o

@@ -1,0 +1,11 @@
+#ifndef _SENSOR_CMD_H
+#define _SENSOR_CMD_H
+
+enum {
+	SENSOR_CMD_START =	0x01,
+	SENSOR_CMD_DETECTED =	0x02,
+	SENSOR_CMD_ACTIVE =	0x03,
+	SENSOR_CMD_INACTIVE =	0x04,
+};
+
+#endif	/* _SENSOR_CMD_H */

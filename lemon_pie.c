@@ -1,15 +1,20 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <libgen.h>
+#include <termios.h>
 #include <julius/juliuslib.h>
+#include "sensor_cmd.h"
 
 #define LOG_TAG		"[lemon_pie] "
 #define JCONF_FILE	"remocon.jconf"
+#define SENSOR_PORT_STR	"26852"
 #define ARRAY_SIZE(a)	(sizeof(a) / sizeof(a[0]))
 
 static struct {
+	const char *squash_server;
+	int has_sensor;
 	int verbose;
-} g_sysopt;
+} app;
 
 static void clear_callbacks(Recog *recog);
 
@@ -93,6 +98,18 @@ static void on_speech_start(Recog *recog, void *dummy)
 	fprintf(stderr, LOG_TAG "detecting...\n");
 }
 
+static void dispatch(const char *lc_cmd)
+{
+	char cmd[256];
+
+	if (app.squash_server)
+		sprintf(cmd, "lemon_corn -proxy %s %s",
+			app.squash_server, lc_cmd);
+	else
+		sprintf(cmd, "lemon_corn %s", lc_cmd);
+	system(cmd);
+}
+
 static void on_result(Recog *recog, void *dummy)
 {
 	/* we have only one recognition process */
@@ -123,59 +140,22 @@ static void on_result(Recog *recog, void *dummy)
 
 		/* action */
 		for (j = 0; j < word_cnt; j++) {
-			int k;
+			unsigned int k;
 			const char *wstr = winfo->woutput[snt->word[j]];
 
 			for (k = 0; k < ARRAY_SIZE(cmd_table); k++) {
-				if (!strcmp(wstr, cmd_table[k].word)) {
-					char cmd[256];
-					sprintf(cmd,
-						"lemon_corn -proxy localhost"
-						" %s",
-						cmd_table[k].lc_cmd);
-					system(cmd);
-				}
+				if (!strcmp(wstr, cmd_table[k].word))
+					dispatch(cmd_table[k].lc_cmd);
 			}
 		}
 
 		/* score */
-		if (g_sysopt.verbose)
+		if (app.verbose)
 			printf("score%d: %f\n", i + 1, snt->score);
 	}
 
 	j_close_stream(recog);
 	clear_callbacks(recog);
-}
-
-int parse_arg(int argc, char **argv)
-{
-	char *cpy_path;
-	int r = 0;
-	int i;
-
-	/*
-	 * default settings
-	 */
-	g_sysopt.verbose = 0;
-
-	for (i = 1; i < argc; i++) {
-		if (!strcmp(argv[i], "--verbose")) {
-			g_sysopt.verbose = 1;
-		} else if (!strcmp(argv[i], "--help")) {
-			goto usage;
-		} else {
-			r = 1;
-			goto usage;
-		}
-	}
-
-	return 0;
-
-usage:
-	cpy_path = strdup(argv[0]);
-	fprintf(stderr, "usage : %s [--verbose]\n", basename(cpy_path));
-	free(cpy_path);
-	exit(r);
 }
 
 static struct {
@@ -216,16 +196,210 @@ static void clear_callbacks(Recog *recog)
 	callback_delete(recog, g_cbs.id_result);
 }
 
+/*
+ * return value:
+ *   1: continue
+ *   0: quit
+ *  -1: error
+ */
+static int main_loop(int fd_sensor, Recog *recog)
+{
+	int r;
+
+	fprintf(stderr, LOG_TAG "waiting for an event\n");
+	if (fd_sensor >= 0) {
+		int read_len;
+		char c;
+
+		c = SENSOR_CMD_START;
+		if (write(fd_sensor, &c, 1) < 0) {
+			fprintf(stderr, "failed to write sensor command\n");
+			return -1;
+		}
+		if ((read_len = read(fd_sensor, &c, 1)) < 1) {
+			fprintf(stderr, "failed to read sensor response\n");
+			return -1;
+		}
+		if (c != SENSOR_CMD_DETECTED) {
+			fprintf(stderr,
+				"invalid sensor response (0x%02x)\n", c);
+			return -1;
+		}
+		c = SENSOR_CMD_ACTIVE;
+		if (write(fd_sensor, &c, 1) < 0) {
+			fprintf(stderr, "failed to write sensor command\n");
+			return -1;
+		}
+	} else {
+		int c;
+		do {
+			c = getchar();
+			if (c == 'q')	/* quit command */
+				return 0;
+		} while (c != '\n');
+	}
+
+	if (add_callbacks(recog) < 0)
+		return -1;
+
+	if (j_adin_init(recog) == FALSE) {
+		fprintf(stderr, "failed to initialize audio input\n");
+		return -1;
+	}
+
+	/* output system information to log */
+	if (app.verbose)
+		j_recog_info(recog);
+
+	r = j_open_stream(recog, NULL);
+	if (r < 0) {
+		if (r == -1)		/* error */
+			fprintf(stderr, "error in input stream\n");
+		else if (r == -2)	/* end of recognition process */
+			fprintf(stderr, "failed to begin input stream\n");
+		return -1;
+	}
+
+	if (j_recognize_stream(recog) < 0)
+		return -1;
+
+	if (fd_sensor >= 0) {
+		char c;
+
+		c = SENSOR_CMD_INACTIVE;
+		if (write(fd_sensor, &c, 1) < 0) {
+			fprintf(stderr, "failed to write sensor command\n");
+			return -1;
+		}
+	}
+
+	return 1;
+}
+
+static int sensor_sock_open(const char *host_name, const char *port_str)
+{
+	int fd;
+	struct addrinfo ai_hint, *aip;
+	int r;
+
+	if ((fd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+		fprintf(stderr, "socket() failed\n");
+		return -1;
+	}
+
+	memset(&ai_hint, 0, sizeof(struct addrinfo));
+	ai_hint.ai_family = AF_INET;
+	ai_hint.ai_socktype = SOCK_STREAM;
+	ai_hint.ai_flags = 0;
+	ai_hint.ai_protocol = 0;
+
+	if ((r = getaddrinfo(host_name, port_str, &ai_hint, &aip)) < 0) {
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(r));
+		close(fd);
+		return -1;
+	}
+
+	if (connect(fd, aip->ai_addr, aip->ai_addrlen) < 0) {
+		fprintf(stderr, "connect() failed\n");
+		close(fd);
+		freeaddrinfo(aip);
+		return -1;
+	}
+
+	freeaddrinfo(aip);
+
+	return fd;
+}
+
+static int sensor_sock_close(int fd)
+{
+	return close(fd);
+}
+
+static int setup_stdin(struct termios *stdtio_old)
+{
+	struct termios stdtio_new;
+
+	tcgetattr(0, stdtio_old);
+
+	memcpy(&stdtio_new, stdtio_old, sizeof(struct termios));
+	stdtio_new.c_lflag &= ~(ICANON | ECHO);
+	tcsetattr(0, TCSANOW, &stdtio_new);
+
+	return 0;
+}
+
+static void restore_stdin(const struct termios *stdtio_old)
+{
+	tcsetattr(0, TCSANOW, stdtio_old);
+}
+
+int parse_arg(int argc, char **argv)
+{
+	char *cpy_path;
+	int r = 0;
+	int i;
+
+	/*
+	 * default settings
+	 */
+	app.squash_server = NULL;
+	app.has_sensor = 0;
+	app.verbose = 0;
+
+	for (i = 1; i < argc; i++) {
+		if (!strcmp(argv[i], "--squash")) {
+			if (++i == argc) {
+				r = 1;
+				goto usage;
+			}
+			app.squash_server = argv[i];
+		} else if (!strcmp(argv[i], "--sensor")) {
+			app.has_sensor = 1;
+		} else if (!strcmp(argv[i], "--verbose")) {
+			app.verbose = 1;
+		} else if (!strcmp(argv[i], "--help")) {
+			goto usage;
+		} else {
+			r = 1;
+			goto usage;
+		}
+	}
+
+	/* sanity check */
+	if (app.has_sensor && !app.squash_server) {
+		fprintf(stderr,
+			"specified --sensor, but --squash is not given.\n");
+		r = 1;
+		goto usage;
+	}
+
+	return 0;
+
+usage:
+	cpy_path = strdup(argv[0]);
+	fprintf(stderr,
+"usage : %s\n"
+"        [--squash <host>]\n"
+"        [--sensor]\n"
+"        [--verbose]\n"
+"        [--help]\n",
+		basename(cpy_path));
+	free(cpy_path);
+	exit(r);
+}
+
 int main(int argc, char *argv[])
 {
 	Jconf *jconf;
 	Recog *recog;
-	int r;
+	int fd_sensor = -1;
+	struct termios stdtio_old;
 
 	if (parse_arg(argc, argv) < 0)
 		return 1;
 
-	if (!g_sysopt.verbose)
+	if (!app.verbose)
 		jlog_set_output(NULL);
 
 	jconf = j_config_load_file_new(JCONF_FILE);
@@ -240,31 +414,29 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	if (add_callbacks(recog) < 0)
-		return 1;
-
-	if (j_adin_init(recog) == FALSE) {
-		fprintf(stderr, "failed to initialize audio input\n");
-		return 1;
+	if (app.has_sensor) {
+		fd_sensor = sensor_sock_open(app.squash_server,
+					     SENSOR_PORT_STR);
+		if (fd_sensor < 0)
+			return 1;
 	}
 
-	/* output system information to log */
-	if (g_sysopt.verbose)
-		j_recog_info(recog);
+	setup_stdin(&stdtio_old);
 
-	r = j_open_stream(recog, NULL);
-	if (r < 0) {
-		if (r == -1)		/* error */
-			fprintf(stderr, "error in input stream\n");
-		else if (r == -2)	/* end of recognition process */
-			fprintf(stderr, "failed to begin input stream\n");
-		return 1;
+	for (;;) {
+		int r = main_loop(fd_sensor, recog);
+		if (r < 0)
+			return 1;
+		else if (r == 0)
+			break;
 	}
 
-	if (j_recognize_stream(recog) < 0)
-		return 1;
+	restore_stdin(&stdtio_old);
 
 	j_recog_free(recog);
+
+	if (app.has_sensor)
+		sensor_sock_close(fd_sensor);
 
 	return 0;
 }
